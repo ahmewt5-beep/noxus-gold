@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+:root {
+  /* 👇 PUSULA STANDARDI: SADECE AYDINLIK MOD (Koyu mod riskini kaldırdık) */
+  --background: #ffffff;
+  --foreground: #1e293b; /* Slate-800 */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Standart HTML Ayarları */
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+  overflow-x: hidden; /* Yatay taşmayı engeller (Sidebar sorunu için önlem) */
+}
+
+/* --- PROFESYONEL BASKI (SILENT PRINT HAZIRLIĞI) --- */
+@media print {
+  @page {
+    margin: 0; /* Kenar boşluklarını sıfırla (Etiket tam otursun) */
+    size: auto;
+  }
+
+  /* Yazdırma sırasında gereksiz her şeyi gizle */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Sadece yazdırma alanını (Ref) göster */
+  #print-section, #print-section * {
+    visibility: visible;
+  }
+
+  /* Yazdırma alanını kağıdın en tepesine yerleştir */
+  #print-section {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Grafik kütüphanesi (Recharts) baskı hatasını önle */
+  .recharts-wrapper {
+    display: none !important;
+  }
+}
