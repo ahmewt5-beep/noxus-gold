@@ -2,7 +2,7 @@
 import { 
   LayoutDashboard, Users, Package, Wallet, PieChart, 
   Settings, LogOut, Hexagon, X, ShieldCheck, UserCog,
-  ScanBarcode, Radio 
+  ScanBarcode, Radio, Siren 
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -10,7 +10,6 @@ import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { useAuth } from "./AuthProvider"; 
 
-// 👇 DÜZELTME: Type tanımını React'in state mantığına uyumlu yaptık
 interface SidebarProps {
   isOpen: boolean;
   setIsOpen: React.Dispatch<React.SetStateAction<boolean>> | ((val: boolean) => void);
@@ -37,7 +36,6 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     if (typeof window !== 'undefined' && window.innerWidth < 768) setIsOpen(false);
   };
 
-  // ... (Geri kalan kod aynı, sadece üstteki interface değişti)
   return (
     <>
       <div 
@@ -62,10 +60,12 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         </div>
 
         <nav className="flex-1 space-y-2 overflow-y-auto custom-scrollbar">
+          {/* 1. ÜST BÖLÜM */}
           <SidebarItem icon={<LayoutDashboard size={20} />} text="Genel Bakış" href="/" isOpen={isOpen} active={isActive("/")} onClick={handleLinkClick} />
           <SidebarItem icon={<Users size={20} />} text="Cari Hesaplar" href="/customers" isOpen={isOpen} active={isActive("/customers")} onClick={handleLinkClick} />
           <SidebarItem icon={<ShieldCheck size={20} />} text="Vitrin Sayımı" href="/showcase" isOpen={isOpen} active={isActive("/showcase")} onClick={handleLinkClick} />
 
+          {/* 2. OPERASYONEL BÖLÜM (Personel ve Admin Görür) */}
           {(canViewVault || isStaff) && (
              <>
                <SidebarItem icon={<Package size={20} />} text="Stok & Maden" href="/stock" isOpen={isOpen} active={isActive("/stock")} onClick={handleLinkClick} />
@@ -74,12 +74,27 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
              </>
           )}
 
+          {/* 3. FİNANSAL BÖLÜM (Sadece Admin Görür) */}
           {canViewVault && (
             <>
               <SidebarItem icon={<Wallet size={20} />} text="Kasa İşlemleri" href="/vault" isOpen={isOpen} active={isActive("/vault")} onClick={handleLinkClick} />
-              <SidebarItem icon={<PieChart size={20} />} text="İstihbarat" href="/reports" isOpen={isOpen} active={isActive("/reports")} onClick={handleLinkClick} />
+              <SidebarItem icon={<PieChart size={20} />} text="Finansal Raporlar" href="/reports" isOpen={isOpen} active={isActive("/reports")} onClick={handleLinkClick} />
             </>
           )}
+
+          {/* 4. RADAR (İSTİHBARAT) - Finansal Raporların Altına Eklendi */}
+          {/* Not: Herkes görsün istiyorsan buraya, sadece admin görsün istiyorsan üstteki süslü parantezin içine alabilirsin. Şu an herkes görüyor. */}
+          <div className="pt-2"> {/* Hafif bir boşluk bıraktık ayrı dursun diye */}
+            <SidebarItem 
+                icon={<Siren size={20} className="text-red-500 animate-pulse" />} 
+                text="Radar (İstihbarat)" 
+                href="/radar" 
+                isOpen={isOpen} 
+                active={isActive("/radar")} 
+                onClick={handleLinkClick} 
+            />
+          </div>
+
         </nav>
 
         <div className="border-t border-slate-800 pt-4 space-y-2 shrink-0">

@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { AuthProvider } from "@/components/AuthProvider"; 
+import { AuthProvider } from "@/components/AuthProvider";
+import AiAssistant from "@/components/AiAssistant"; // 👈 1. EKLEME: İMPORT
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,9 +18,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Noxus Gold",
   description: "Profesyonel Kuyumcu Yönetim Paneli",
-  manifest: "/manifest.json", // 👈 İŞTE BU EKSİKTİ!
+  manifest: "/manifest.json",
   icons: {
-    icon: "/icon-192x192.png", // (Bu dosyaları public'e koyman gerekecek)
+    icon: "/icon-192x192.png",
     apple: "/icon-192x192.png",
   }
 };
@@ -28,7 +29,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1, // Kullanıcı eliyle zoom yapıp bozmasın
+  maximumScale: 1,
   userScalable: false,
 };
 
@@ -44,6 +45,7 @@ export default function RootLayout({
       >
         <AuthProvider>
             {children}
+            <AiAssistant /> {/* 👈 2. EKLEME: ASİSTAN BURAYA */}
         </AuthProvider>
       </body>
     </html>
