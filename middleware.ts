@@ -2,8 +2,10 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
-  // 1. Gidilmek istenen sayfa "landing" veya "login" ise KARIŞMA, GEÇSİN.
   const path = request.nextUrl.pathname;
+
+  // 🔥 İŞTE ÇÖZÜM BURADA:
+  // Eğer gidilen yol "/landing" veya "/login" ile başlıyorsa KARIŞMA (return next).
   if (path.startsWith("/landing") || path.startsWith("/login") || path.startsWith("/auth")) {
     return NextResponse.next();
   }
@@ -40,12 +42,12 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 2. Eğer kullanıcı YOKSA ve korumalı bir sayfadaysa -> Logine at
+  // KURAL 1: Kullanıcı yoksa ve korumalı alandaysa -> Login'e at
   if (!user && path !== "/login") {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // 3. Eğer kullanıcı VARSA ve Login sayfasına gitmeye çalışıyorsa -> Ana sayfaya at
+  // KURAL 2: Kullanıcı varsa ve Login'e gitmeye çalışıyorsa -> Ana Sayfaya (Dashboard) at
   if (user && path === "/login") {
     return NextResponse.redirect(new URL("/", request.url));
   }
@@ -54,15 +56,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Bu middleware hangi yollarda çalışsın?
   matcher: [
-    /*
-     * Aşağıdakiler HARİÇ tüm yollarda çalış:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public klasöründeki görseller (svg, png, jpg)
-     */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
