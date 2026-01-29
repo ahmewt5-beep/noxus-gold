@@ -1,68 +1,119 @@
 "use client";
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-
-// Rol Tanımları
-type Role = 'super_admin' | 'admin' | 'personel' | 'tezgahtar' | null;
 
 interface AuthContextType {
   user: any;
-  role: Role;
+  role: string | null;
   loading: boolean;
-  isSuperAdmin: boolean; // SEN (Platform Sahibi)
-  isStoreAdmin: boolean; // MAĞAZA SAHİBİ (Admin)
-  isStaff: boolean;      // Personel
-  canViewVault: boolean; // Kasa Yetkisi (Super Admin + Admin)
-  canManageTeam: boolean; // Ekip Kurma Yetkisi (Super Admin + Admin)
+  isSuperAdmin: boolean;
+  isStaff: boolean;
+  canManageTeam: boolean;
+  canViewVault: boolean;
+  signOut: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({ 
-  user: null, role: null, loading: true, 
-  isSuperAdmin: false, isStoreAdmin: false, isStaff: false,
-  canViewVault: false, canManageTeam: false
-});
+const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<any>(null);
-  const [role, setRole] = useState<Role>(null);
+  const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  // Rol Yetkileri
+  const isSuperAdmin = role === 'super_admin';
+  const isAdmin = role === 'admin';
+  const isPersonel = role === 'personel';
+  // Tezgahtar sadece 'tezgahtar'dır.
+
+  // Yetki Grupları
+  const canManageTeam = isSuperAdmin || isAdmin; // Ekip yönetimi
+  const canViewVault = isSuperAdmin || isAdmin; // Kasa ve Rapor
+  const isStaff = isSuperAdmin || isAdmin || isPersonel; // Stok yönetimi
 
   useEffect(() => {
-    async function getUser() {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
+    // 1. Mevcut Oturumu Kontrol Et
+    const checkUser = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+          setUser(session.user);
+          // 🔥 KRİTİK: Rolü Metadata'dan değil, Canlı Tablodan Çek
+          await fetchRoleFromProfile(session.user.id);
+        } else {
+          setRole(null);
+        }
+      } catch (error) {
+        console.error("Auth Error:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-      if (user) {
-        // Profil tablosundan rolü çek
-        const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-        setRole(data?.role as Role || 'tezgahtar');
+    checkUser();
+
+    // 2. Oturum Değişikliklerini Dinle
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        await fetchRoleFromProfile(session.user.id);
+      } else {
+        setUser(null);
+        setRole(null);
+        router.push("/login");
       }
       setLoading(false);
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [router]);
+
+  // Profil tablosundan ROL çekme fonksiyonu
+  const fetchRoleFromProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .single();
+    
+    if (data) {
+      console.log("🔥 GÜNCEL ROL:", data.role); // Konsoldan kontrol et
+      setRole(data.role);
+    } else {
+      console.error("Profil bulunamadı:", error);
+      setRole("tezgahtar"); // Güvenlik için varsayılan en düşük
     }
-    getUser();
-  }, []);
-
-  // YETKİ MATRİSİ
-  const isSuperAdmin = role === 'super_admin';
-  const isStoreAdmin = role === 'admin';
-  const isStaff = role === 'personel';
-  
-  // Kasa ve Raporları kim görür? -> Sen ve Mağaza Sahibi
-  const canViewVault = isSuperAdmin || isStoreAdmin;
-
-  // Kim eleman ekleyebilir? -> Sen ve Mağaza Sahibi
-  const canManageTeam = isSuperAdmin || isStoreAdmin;
-
-  const value = {
-    user, role, loading,
-    isSuperAdmin, isStoreAdmin, isStaff,
-    canViewVault, canManageTeam
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-indigo-600 w-10 h-10"/></div>;
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setRole(null);
+    setUser(null);
+    router.push("/login");
+  };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  if (loading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-slate-900 text-white">
+        <Loader2 className="animate-spin text-indigo-500" size={48} />
+      </div>
+    );
+  }
+
+  return (
+    <AuthContext.Provider value={{ 
+        user, role, loading, signOut,
+        isSuperAdmin, isStaff, canManageTeam, canViewVault
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
 export const useAuth = () => useContext(AuthContext);
