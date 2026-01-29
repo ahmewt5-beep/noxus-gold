@@ -22,23 +22,22 @@ export default function LoginPage() {
       });
 
       if (error) {
-        toast.error(error.message);
+        toast.error("Giriş Başarısız", { description: error.message });
+        setLoading(false); // Hata varsa loading'i kapat
       } else {
         toast.success("Giriş Başarılı! Yönlendiriliyorsunuz...");
         
-        // Kritik Hamle: Çerezin oturması için router.refresh yapıyoruz
+        // 1. Önce router'ı yenile (Auth durumunu algılaması için şart)
         router.refresh(); 
-
-        // Sonra sayfayı zorla yenileyerek ana sayfaya git
+        
+        // 2. Kısa bir gecikmeyle ana sayfaya at
+        // (Next.js'in cookie'yi işlemesi için minik bir süre tanıyoruz)
         setTimeout(() => {
-             window.location.href = '/'; 
-        }, 1000); 
+             router.replace('/'); 
+        }, 500); 
       }
     } catch (error: any) {
-      toast.error("Giriş Başarısız", {
-        description: "E-posta veya şifre hatalı. Lütfen kontrol edin."
-      });
-    } finally {
+      toast.error("Beklenmedik Hata", { description: error.message });
       setLoading(false);
     }
   };
@@ -105,7 +104,7 @@ export default function LoginPage() {
             <button 
               type="submit" 
               disabled={loading}
-              className="w-full bg-slate-900 hover:bg-indigo-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-slate-900/20 hover:shadow-indigo-600/30 transition-all duration-300 flex items-center justify-center gap-2 group transform active:scale-95"
+              className="w-full bg-slate-900 hover:bg-indigo-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-slate-900/20 hover:shadow-indigo-600/30 transition-all duration-300 flex items-center justify-center gap-2 group transform active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {loading ? <Loader2 className="animate-spin" /> : (
                 <>Giriş Yap <ArrowRight size={20} className="group-hover:translate-x-1 transition" /></>
