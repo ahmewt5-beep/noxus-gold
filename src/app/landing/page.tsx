@@ -327,7 +327,7 @@ export default function LandingPage() {
   );
 }
 
-// --- ZIG-ZAG MODULE COMPONENT (IMAGE ENABLED) ---
+// --- ZIG-ZAG MODULE COMPONENT (IMAGE FIT FIX) ---
 function ModuleSection({align, icon, title, desc, features, color, imageSrc}: any) {
     const isLeft = align === 'left';
     
@@ -361,16 +361,20 @@ function ModuleSection({align, icon, title, desc, features, color, imageSrc}: an
                 </ul>
             </div>
 
-            {/* VISUAL SIDE (REAL SCREENSHOT) */}
+            {/* VISUAL SIDE (FIXED ASPECT RATIO) */}
             <div className="flex-1 w-full">
-                <div className={`aspect-[4/3] bg-slate-950 rounded-3xl border border-slate-800 p-2 relative overflow-hidden group hover:border-opacity-50 transition duration-500 shadow-2xl ${currentColor.split(' ')[2]}`}>
-                    {/* The Image */}
-                    <div className="w-full h-full rounded-2xl overflow-hidden bg-slate-900 relative">
+                {/* aspect-video = 16:9 Geniş Ekran Formatı */}
+                <div className={`aspect-video bg-slate-950 rounded-3xl border border-slate-800 p-2 relative overflow-hidden group hover:border-opacity-50 transition duration-500 shadow-2xl ${currentColor.split(' ')[2]}`}>
+                    
+                    {/* The Image Container */}
+                    <div className="w-full h-full rounded-2xl overflow-hidden bg-slate-900 relative flex items-center justify-center">
                         {imageSrc ? (
                             <img 
                                 src={imageSrc} 
                                 alt={`${title} Arayüzü`}
-                                className="w-full h-full object-cover object-top hover:scale-105 transition duration-700"
+                                // object-contain: Resmi kesme, kutuya sığdır.
+                                // hover:scale-105: Üzerine gelince hafifçe büyüt.
+                                className="w-full h-full object-contain hover:scale-105 transition duration-700"
                                 onError={(e) => {
                                     e.currentTarget.style.display = 'none';
                                     e.currentTarget.parentElement!.innerHTML += `
@@ -385,8 +389,8 @@ function ModuleSection({align, icon, title, desc, features, color, imageSrc}: an
                         )}
                     </div>
 
-                    {/* Fake Window Controls */}
-                    <div className="absolute top-4 left-4 right-4 h-6 flex gap-1.5 z-10">
+                    {/* Fake Window Controls (Mac Traffic Lights) */}
+                    <div className="absolute top-4 left-4 h-6 flex gap-1.5 z-10 bg-slate-950/50 px-2 py-1 rounded-full backdrop-blur-sm border border-white/5">
                         <div className="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
                         <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></div>
                         <div className="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
