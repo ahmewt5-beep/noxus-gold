@@ -20,7 +20,6 @@ const supabaseAdmin = createClient(
 // YENİ KULLANICI OLUŞTURMA
 export async function createStaffUser(prevState: any, formData: FormData) {
   
-  // 👇 KRİTİK DÜZELTME: 'await' EKLENDİ
   const cookieStore = await cookies(); 
 
   // SSR CLIENT (Okuma Yetkili - Kimin işlem yaptığını anlamak için)
@@ -43,20 +42,22 @@ export async function createStaffUser(prevState: any, formData: FormData) {
     return { success: false, message: "İşlem yapmak için oturum açmalısınız." };
   }
 
-  // İşlemi yapanın rolünü sorgula
-  const { data: currentProfile } = await supabaseAdmin
+  // İşlemi yapanın rolünü VE MAĞAZASINI sorgula
+  const { data: creatorProfile } = await supabaseAdmin
     .from('profiles')
-    .select('role')
+    .select('role, store_id') // 👈 Store ID'yi de çektik
     .eq('id', currentUser.id)
     .single();
 
-  const creatorRole = currentProfile?.role;
+  const creatorRole = creatorProfile?.role;
+  let targetStoreId = creatorProfile?.store_id; // Varsayılan: Ekleyen kişinin mağazası
   
   // 2. FORM VERİLERİNİ AL
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
   const fullName = formData.get("fullName") as string;
   const targetRole = formData.get("role") as string;
+  const city = formData.get("city") as string; // Şehir bilgisi
 
   if (!email || !password || !fullName) {
     return { success: false, message: "Eksik bilgi girdiniz." };
@@ -64,7 +65,7 @@ export async function createStaffUser(prevState: any, formData: FormData) {
 
   // --- HİYERARŞİ KONTROLLERİ ---
   
-  // Sadece 'super_admin', 'admin' oluşturabilir.
+  // Sadece 'super_admin' yeni bir 'admin' (Mağaza Yöneticisi) oluşturabilir.
   if (targetRole === 'admin' && creatorRole !== 'super_admin') {
     return { success: false, message: "YETKİSİZ: Sadece Platform Sahibi yeni mağaza (Admin) açabilir." };
   }
@@ -75,7 +76,23 @@ export async function createStaffUser(prevState: any, formData: FormData) {
   }
 
   try {
-    // 3. KULLANICIYI OLUŞTUR
+    // --- 🔥 OTOMASYON: YENİ MAĞAZA AÇMA ---
+    // Eğer Super Admin yeni bir 'admin' ekliyorsa, ona yeni dükkan açıyoruz.
+    if (creatorRole === 'super_admin' && targetRole === 'admin') {
+        const storeName = `${city} - ${fullName} Şubesi`;
+        
+        const { data: newStore, error: storeError } = await supabaseAdmin
+            .from('stores')
+            .insert({ name: storeName })
+            .select()
+            .single();
+        
+        if (storeError) throw new Error("Mağaza oluşturulamadı: " + storeError.message);
+        targetStoreId = newStore.id; // Yeni admin bu yeni mağazaya bağlanacak
+    }
+    // ---------------------------------------------
+
+    // 3. KULLANICIYI OLUŞTUR (AUTH)
     const { data: userData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -86,20 +103,28 @@ export async function createStaffUser(prevState: any, formData: FormData) {
     if (authError) throw authError;
 
     if (userData.user) {
-      // 4. ROLÜ GÜNCELLE (Profiles Tablosu)
+      // 4. PROFİLİ GÜNCELLE VE MAĞAZAYA BAĞLA
+      // Update yerine direkt Insert/Upsert yapıyoruz ki store_id'yi de basabilelim.
       const { error: profileError } = await supabaseAdmin
         .from('profiles')
-        .update({ role: targetRole, full_name: fullName })
-        .eq('id', userData.user.id);
+        .upsert({ 
+            id: userData.user.id, 
+            role: targetRole, 
+            full_name: fullName,
+            email: email,
+            city: city,      // Şehir
+            store_id: targetStoreId // 👈 MAĞAZA BAĞLANTISI
+        });
 
       if (profileError) {
-          // Profil güncellenemezse (örneğin trigger çalışmazsa) elle eklemeyi dene
-          await supabaseAdmin.from('profiles').insert({ id: userData.user.id, role: targetRole, full_name: fullName });
+          // Hata olursa kullanıcıyı sil (Rollback)
+          await supabaseAdmin.auth.admin.deleteUser(userData.user.id);
+          throw new Error("Profil oluşturulamadı: " + profileError.message);
       }
     }
 
     revalidatePath("/team");
-    return { success: true, message: "Kullanıcı başarıyla oluşturuldu." };
+    return { success: true, message: "Personel ve mağaza ayarları başarıyla oluşturuldu." };
 
   } catch (error: any) {
     return { success: false, message: "Hata: " + error.message };
@@ -138,6 +163,7 @@ export async function deleteStaffUser(targetUserId: string) {
 export async function updateStaffUser(targetUserId: string, formData: FormData) {
   const fullName = formData.get("fullName") as string;
   const role = formData.get("role") as string;
+  const city = formData.get("city") as string;
   const password = formData.get("password") as string; 
 
   if (!fullName || !role) return { success: false, message: "İsim ve Rütbe zorunludur." };
@@ -146,7 +172,7 @@ export async function updateStaffUser(targetUserId: string, formData: FormData) 
     // 1. Profil Bilgilerini Güncelle
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
-      .update({ full_name: fullName, role: role })
+      .update({ full_name: fullName, role: role, city: city }) // Şehri de güncelle
       .eq('id', targetUserId);
 
     if (profileError) throw profileError;

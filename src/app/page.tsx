@@ -3,27 +3,26 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { Customer, Transaction, Product } from "@/types";
 import Sidebar from "@/components/Sidebar";
-import { sendWhatsappReceipt } from "@/lib/whatsapp";
 import { useScale } from "@/hooks/useScale";
-import { math } from "@/lib/math"; // 👈 YENİ MATEMATİK MOTORU
+import { math } from "@/lib/math"; 
 import { 
   Menu, Plus, X, Loader2, Package, Wallet, DollarSign, 
-  History, Banknote, Printer, ScanBarcode, Scale, Trash2, Unplug, Plug, ShoppingCart
+  History, Banknote, ScanBarcode, Plug, Unplug, ShoppingCart, ShoppingBasket, Trash2, Building2
 } from "lucide-react";
 import { Toaster, toast } from 'sonner';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Sepet Öğesi Tipi
 interface CartItem {
-  id: string; // Geçici ID (Date.now())
+  id: string; 
   product_id?: number;
   product_name: string;
   gram: number;
   price: number;
-  purity: number; // Has hesaplamak için
+  purity: number; 
   has_equivalent: number;
   description?: string;
-  type: 'SATIS' | 'TAHSILAT'; // Satır bazlı işlem tipi
+  type: 'SATIS' | 'TAHSILAT'; 
 }
 
 export default function Dashboard() {
@@ -45,8 +44,10 @@ export default function Dashboard() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [storeName, setStoreName] = useState("GOLDEX KUYUMCULUK");
   
+  // MAĞAZA BİLGİSİ
+  const [storeInfo, setStoreInfo] = useState({ id: 0, name: "Yükleniyor..." });
+
   // SEPET (CART) STATE 🛒
   const [cart, setCart] = useState<CartItem[]>([]);
   
@@ -74,7 +75,7 @@ export default function Dashboard() {
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [selectedProductId, setSelectedProductId] = useState("");
   const [barcode, setBarcode] = useState("");
-  const [amount, setAmount] = useState(""); // Miktar (Gram veya Para)
+  const [amount, setAmount] = useState(""); 
   const [description, setDescription] = useState("");
 
   // Terazi Otomasyonu
@@ -87,6 +88,20 @@ export default function Dashboard() {
   // VERİ ÇEKME
   const fetchInitialData = useCallback(async () => {
     try {
+      // 1. Önce Hangi Mağazada Olduğumuzu Öğrenelim
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: profile } = await supabase.from('profiles').select('store_id, stores(name)').eq('id', user.id).single();
+      
+      let currentStoreId = 0;
+      if (profile && profile.store_id) {
+          currentStoreId = profile.store_id;
+          // @ts-ignore
+          setStoreInfo({ id: profile.store_id, name: profile.stores?.name || "Bilinmeyen Mağaza" });
+      }
+
+      // 2. Verileri Çek (RLS sayesinde sadece bu mağazanın verileri gelir)
       const { data: custData } = await supabase.from('customers').select('*').order('full_name');
       if (custData) setCustomers(custData);
 
@@ -97,14 +112,8 @@ export default function Dashboard() {
         setStats(prev => ({ ...prev, goldStock: totalStock }));
       }
 
-      const { data: allTrx } = await supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(20);
+      const { data: allTrx } = await supabase.from('transactions').select('*, customers(full_name)').order('created_at', { ascending: false }).limit(20);
       if (allTrx) setTransactions(allTrx as any);
-
-      // Basit Nakit Özeti (Transaction tablosundan hesaplamak yerine anlık bakiye gösterilebilir veya detaylı query yapılabilir)
-      // Şimdilik 0 bırakıyoruz, Raporlar sayfasında detaylısı var.
-
-      const { data: settings } = await supabase.from('app_settings').select('store_name').single();
-      if (settings?.store_name) setStoreName(settings.store_name);
 
     } catch (error) { console.error(error); } finally { setLoading(false); }
   }, []);
@@ -127,8 +136,7 @@ export default function Dashboard() {
     }
   };
 
-  // --- 🛒 SEPET YÖNETİMİ (CART LOGIC) ---
-
+  // --- 🛒 SEPET YÖNETİMİ ---
   const addToCart = () => {
     if (!amount || parseFloat(amount) <= 0) { toast.warning("Miktar giriniz."); return; }
     if (currency === 'HAS' && !selectedProductId) { toast.warning("Ürün seçiniz."); return; }
@@ -138,16 +146,14 @@ export default function Dashboard() {
     let itemPurity = 0;
     let itemHas = 0;
     
-    // Ürün Bilgisi
     if (currency === 'HAS') {
         const prod = products.find(p => p.id === parseInt(selectedProductId));
         if (prod) {
-            let productName: string = currency;
+            productName = prod.name;
             itemPurity = prod.purity;
             itemHas = math.calcHas(numAmount, prod.purity);
         }
     } else {
-        // Para birimi ise has karşılığı yoktur (veya kurdan hesaplanır, şimdilik 0)
         itemHas = 0;
     }
 
@@ -164,14 +170,10 @@ export default function Dashboard() {
     };
 
     setCart(prev => [...prev, newItem]);
-    
-    // Formu Temizle (Müşteri hariç)
     setAmount("");
     setDescription("");
     setBarcode("");
     setSelectedProductId("");
-    // setCurrency('HAS'); // Opsiyonel: Her eklemede HAS'a dönsün mü?
-    
     toast.success("Sepete eklendi.");
     setTimeout(() => document.getElementById('amount-input')?.focus(), 100);
   };
@@ -180,20 +182,22 @@ export default function Dashboard() {
     setCart(prev => prev.filter(i => i.id !== id));
   };
 
-  // --- 💰 SATIŞI TAMAMLA (BATCH INSERT) ---
+  // --- 💰 SATIŞI TAMAMLA (STORE_ID DESTEKLİ) ---
   const handleCheckout = async () => {
     if (cart.length === 0) { toast.warning("Sepet boş."); return; }
     if (!selectedCustomer) { toast.warning("Lütfen müşteri seçiniz."); return; }
+    if (storeInfo.id === 0) { toast.error("Mağaza bilgisi bulunamadı. Lütfen sayfayı yenileyin."); return; }
 
     setProcessing(true);
     const customerId = parseInt(selectedCustomer);
     const currentCust = customers.find(c => c.id === customerId);
+    const { data: { user } } = await supabase.auth.getUser();
 
     try {
-        // 1. İşlemleri Toplu Kaydet (Promise.all ile paralel)
         const promises = cart.map(async (item) => {
-            // Transaction Kaydı
+            // 1. Transaction Ekle (Store ID ile)
             await supabase.from('transactions').insert({
+                store_id: storeInfo.id, // 👈 KRİTİK: Satış bu mağazaya yazılıyor
                 customer_id: customerId,
                 type: item.type,
                 product_name: item.product_name,
@@ -201,24 +205,25 @@ export default function Dashboard() {
                 price: item.price,
                 has_equivalent: item.has_equivalent,
                 description: item.description,
-                currency: currency // Not: Sepetteki her ürünün currency'si farklı olabilir, burada basitleştirdik. İdealde item içinde tutulmalı.
+                currency: currency 
             });
 
-            // Stok Düşümü (Eğer ürünse)
+            // 2. Stok Düş (Store ID ile)
             if (item.product_id) {
                 const stockChange = item.type === 'SATIS' ? -item.gram : item.gram;
                 
-                // Mevcut stoğu çekip güncellemek daha güvenli (Race condition önlemi)
-                // Ancak basitlik için burada direkt update atıyoruz. RLS veya stored procedure daha iyi olurdu.
-                // Biz React tarafında basit tutacağız.
+                // RLS olduğu için sadece kendi mağazasındaki ürünü bulur
                 const { data: prod } = await supabase.from('products').select('stock_gram').eq('id', item.product_id).single();
+                
                 if(prod) {
                     await supabase.from('products').update({ 
                         stock_gram: math.add(prod.stock_gram, stockChange) 
                     }).eq('id', item.product_id);
                 }
 
+                // Envanter Logu (Store ID ile)
                 await supabase.from('inventory_logs').insert({ 
+                    store_id: storeInfo.id, // 👈 KRİTİK
                     product_id: item.product_id, 
                     type: item.type === 'SATIS' ? 'CIKIS' : 'GIRIS', 
                     gram_change: stockChange, 
@@ -229,35 +234,29 @@ export default function Dashboard() {
 
         await Promise.all(promises);
 
-        // 2. Müşteri Bakiyesini Tek Seferde Güncelle (Total Hesapla)
+        // 3. Müşteri Bakiyesini Güncelle
         let totalHasChange = 0;
         let totalTLChange = 0;
         let totalUSDChange = 0;
+        let logSummary = "";
 
         cart.forEach(item => {
             const multiplier = item.type === 'SATIS' ? -1 : 1;
-            
-            if (item.gram > 0) { // Altın işlemi
+            logSummary += `${item.product_name} (${item.gram > 0 ? item.gram + 'gr' : item.price + 'TL'}), `;
+
+            if (item.gram > 0) { 
                 totalHasChange = math.add(totalHasChange, math.mul(item.has_equivalent, multiplier));
-            } else { // Para işlemi
-                // Burası biraz karışık çünkü sepette item.currency yok. 
-                // Basitlik için: Şu anki 'currency' state'i neyse o kabul ediliyor. 
-                // *Geliştirme:* CartItem içine 'currency' alanı eklenmeli.
-                // Şimdilik varsayım: Nakit işlemler TL, Dolar işlemleri USD.
-                // Biz currency state'ine güveneceğiz ama sepette karışık döviz varsa bu sorun olur.
-                // HIZLI ÇÖZÜM: item.product_name kontrolü.
+            } else { 
                 if (item.product_name === 'TL' || item.product_name === 'Nakit') {
                     totalTLChange = math.add(totalTLChange, math.mul(item.price, multiplier));
                 } else if (item.product_name === 'USD') {
                     totalUSDChange = math.add(totalUSDChange, math.mul(item.price, multiplier));
                 } else {
-                    // Varsayılan TL
                     totalTLChange = math.add(totalTLChange, math.mul(item.price, multiplier));
                 }
             }
         });
 
-        // Bakiye Update
         if (currentCust) {
             await supabase.from('customers').update({
                 balance_has: math.add(currentCust.balance_has, totalHasChange),
@@ -266,12 +265,25 @@ export default function Dashboard() {
             }).eq('id', customerId);
         }
 
-        toast.success("Satış tamamlandı ve kaydedildi.");
-        setModalOpen(false);
-        setCart([]); // Sepeti boşalt
-        fetchInitialData();
+        // 4. Aktivite Logu (Store ID ile)
+        if (user) {
+            await supabase.from('activity_logs').insert({
+                store_id: storeInfo.id, // 👈 KRİTİK
+                user_id: user.id,
+                action_type: 'SATIŞ',
+                description: `${currentCust?.full_name} işlem yapıldı. Detay: ${logSummary}`,
+                metadata: { 
+                    customer_id: customerId, 
+                    item_count: cart.length,
+                    total_has_change: totalHasChange
+                }
+            });
+        }
 
-        // İsteğe bağlı: WhatsApp Fişi (Burada özet gönderilebilir)
+        toast.success("Satış tamamlandı.");
+        setModalOpen(false);
+        setCart([]); 
+        fetchInitialData();
 
     } catch (error: any) {
         toast.error("Hata: " + error.message);
@@ -280,11 +292,8 @@ export default function Dashboard() {
     }
   };
 
-  // Sepet Toplamları (Görsel İçin)
   const cartTotalHas = cart.reduce((acc, item) => item.type === 'SATIS' ? math.add(acc, item.has_equivalent) : math.sub(acc, item.has_equivalent), 0);
   const cartTotalCash = cart.reduce((acc, item) => item.type === 'SATIS' ? math.add(acc, item.price) : math.sub(acc, item.price), 0);
-
-  const handlePrint = () => { window.print(); };
   const chartData = [ { name: '09:00', kur: 3010 }, { name: '11:00', kur: 3025 }, { name: '13:00', kur: 3018 }, { name: '15:00', kur: 3042 }, { name: '17:00', kur: 3055 } ];
 
   if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600" /></div>;
@@ -299,11 +308,17 @@ export default function Dashboard() {
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-40 shrink-0">
            <div className="flex items-center gap-2 lg:gap-4 overflow-hidden w-full">
              <button onClick={() => setSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-lg md:hidden shrink-0 text-slate-600"><Menu size={24}/></button>
+             
+             {/* MAĞAZA ADI GÖSTERGESİ */}
+             <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg border border-slate-200 text-slate-500 text-sm font-bold">
+                <Building2 size={16} />
+                <span>{storeInfo.name}</span>
+             </div>
+
              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar mask-gradient pr-2 flex-1">
                 <MarketTicker label="HAS" value={market.has} type="gold" />
                 <div className="hidden sm:flex gap-2">
                     <MarketTicker label="USD" value={market.usd} type="currency" />
-                    <MarketTicker label="EUR" value={market.eur} type="currency" />
                 </div>
              </div>
            </div>
@@ -341,7 +356,7 @@ export default function Dashboard() {
                     <div key={t.id} className="flex justify-between items-center text-sm p-3 hover:bg-slate-50 rounded-xl transition border border-transparent hover:border-slate-100 cursor-pointer group">
                       <div className="flex items-center gap-3 overflow-hidden">
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${t.type==='SATIS'?'bg-red-100 text-red-600':'bg-emerald-100 text-emerald-600'}`}>{t.type==='SATIS'?'S':'A'}</div>
-                        <div className="truncate"><p className="font-bold text-slate-700 truncate">{t.customers?.full_name || 'Kasa İşlemi'}</p><p className="text-xs text-slate-400 truncate">{t.product_name}</p></div>
+                        <div className="truncate"><p className="font-bold text-slate-700 truncate">{(t as any).customers?.full_name || 'Kasa İşlemi'}</p><p className="text-xs text-slate-400 truncate">{t.product_name}</p></div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                           <span className={`font-mono font-bold ${t.type === 'SATIS' ? 'text-red-600' : 'text-emerald-600'}`}>{t.gram > 0 ? t.gram + 'gr' : t.price + '₺'}</span>
@@ -405,15 +420,15 @@ export default function Dashboard() {
                {/* Miktar & Terazi */}
                <div className="mb-4">
                   <label className="text-xs font-bold text-slate-500 uppercase mb-1 flex justify-between items-center">
-                     <span>Miktar ({currency})</span>
-                     {currency === 'HAS' && (
-                        <button onClick={() => isConnected ? disconnectScale() : connectScale()} className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full transition ${isConnected ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-500'}`}>
-                           {isConnected ? <Unplug size={10}/> : <Plug size={10}/>} {isConnected ? `(${weight}gr)` : 'Terazi'}
-                        </button>
-                     )}
+                      <span>Miktar ({currency})</span>
+                      {currency === 'HAS' && (
+                         <button onClick={() => isConnected ? disconnectScale() : connectScale()} className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full transition ${isConnected ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-500'}`}>
+                            {isConnected ? <Unplug size={10}/> : <Plug size={10}/>} {isConnected ? `(${weight}gr)` : 'Terazi'}
+                         </button>
+                      )}
                   </label>
                   <div className="relative">
-                     <input id="amount-input" type="number" placeholder="0.00" className="w-full bg-white border border-slate-300 rounded-xl p-3 font-mono font-bold text-xl outline-none focus:border-indigo-500" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                      <input id="amount-input" type="number" placeholder="0.00" className="w-full bg-white border border-slate-300 rounded-xl p-3 font-mono font-bold text-xl outline-none focus:border-indigo-500" value={amount} onChange={(e) => setAmount(e.target.value)} />
                   </div>
                </div>
 
@@ -431,41 +446,41 @@ export default function Dashboard() {
 
                <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                   {cart.length === 0 ? (
-                     <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-50">
-                        <ShoppingBasket size={48} className="mb-2"/>
-                        <p>Sepet boş</p>
-                     </div>
+                      <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-50">
+                         <ShoppingBasket size={48} className="mb-2"/>
+                         <p>Sepet boş</p>
+                      </div>
                   ) : cart.map((item) => (
-                     <div key={item.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100 group">
-                        <div>
-                           <p className="font-bold text-slate-700 text-sm">{item.product_name}</p>
-                           <p className="text-xs text-slate-400 flex gap-2">
-                              <span className={item.type === 'SATIS' ? 'text-red-500' : 'text-emerald-500'}>{item.type}</span>
-                              <span>•</span>
-                              <span>{item.gram > 0 ? `${item.gram} gr` : `${item.price} ${item.product_name}`}</span>
-                           </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                           {item.has_equivalent > 0 && <span className="font-mono text-xs font-bold text-amber-600">{item.has_equivalent.toFixed(2)} Has</span>}
-                           <button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-red-500 transition"><Trash2 size={16}/></button>
-                        </div>
-                     </div>
+                      <div key={item.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100 group">
+                         <div>
+                            <p className="font-bold text-slate-700 text-sm">{item.product_name}</p>
+                            <p className="text-xs text-slate-400 flex gap-2">
+                               <span className={item.type === 'SATIS' ? 'text-red-500' : 'text-emerald-500'}>{item.type}</span>
+                               <span>•</span>
+                               <span>{item.gram > 0 ? `${item.gram} gr` : `${item.price} ${item.product_name}`}</span>
+                            </p>
+                         </div>
+                         <div className="flex items-center gap-3">
+                            {item.has_equivalent > 0 && <span className="font-mono text-xs font-bold text-amber-600">{item.has_equivalent.toFixed(2)} Has</span>}
+                            <button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-red-500 transition"><Trash2 size={16}/></button>
+                         </div>
+                      </div>
                   ))}
                </div>
 
                {/* ÖZET VE ONAY */}
                <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
                   <div className="flex justify-between text-sm font-bold text-slate-600">
-                     <span>Toplam Has (Net):</span>
-                     <span className={cartTotalHas < 0 ? 'text-red-600' : 'text-emerald-600'}>{cartTotalHas.toFixed(2)} gr</span>
+                      <span>Toplam Has (Net):</span>
+                      <span className={cartTotalHas < 0 ? 'text-red-600' : 'text-emerald-600'}>{cartTotalHas.toFixed(2)} gr</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-slate-600">
-                     <span>Nakit Durumu (Tahmini):</span>
-                     <span className={cartTotalCash < 0 ? 'text-red-600' : 'text-emerald-600'}>{cartTotalCash.toLocaleString()}</span>
+                      <span>Nakit Durumu (Tahmini):</span>
+                      <span className={cartTotalCash < 0 ? 'text-red-600' : 'text-emerald-600'}>{cartTotalCash.toLocaleString()}</span>
                   </div>
                   
                   <button onClick={() => handleCheckout()} disabled={processing} className={`w-full py-4 rounded-xl font-bold text-white shadow-lg transition flex justify-center items-center gap-2 ${cart.length > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-300 cursor-not-allowed'}`}>
-                     {processing ? <Loader2 className="animate-spin" /> : 'SATIŞI TAMAMLA'}
+                      {processing ? <Loader2 className="animate-spin" /> : 'SATIŞI TAMAMLA'}
                   </button>
                </div>
             </div>
@@ -478,8 +493,6 @@ export default function Dashboard() {
 }
 
 // BİLEŞENLER
-const ShoppingBasket = ({size, className}:any) => <ShoppingCart size={size} className={className}/>; // Icon wrapper
-
 function StatCard({ title, value, trend, isPositive, icon, color }: any) {
   return (
     <div className="bg-white p-4 lg:p-6 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden group">

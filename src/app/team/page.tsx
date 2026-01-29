@@ -3,10 +3,10 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import Sidebar from "@/components/Sidebar";
 import { createStaffUser, deleteStaffUser, updateStaffUser } from "@/app/actions/auth"; 
-import { TURKEY_CITIES } from "@/lib/constants"; // 👈 ŞEHİR LİSTESİNİ ÇAĞIRDIK
+import { TURKEY_CITIES } from "@/lib/constants"; 
 import { 
   Users, UserPlus, Shield, Activity, 
-  Menu, BadgeCheck, Clock, Pencil, Trash2, XCircle, Save, MapPin
+  Menu, BadgeCheck, Clock, Pencil, Trash2, XCircle, Save, MapPin, Building2, Store
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { useAuth } from "@/components/AuthProvider";
@@ -35,18 +35,23 @@ export default function TeamPage() {
   }, [selectedUser]);
 
   async function fetchTeam() {
-    let query = supabase.from('profiles').select('*').order('role');
+    // Mağaza ismini de çekmek için join (stores) yapıyoruz
+    let query = supabase.from('profiles').select('*, stores(name)').order('role');
 
     if (isSuperAdmin) {
-       // Süper admin herkesi (diğer adminleri de) görür
+       // Süper admin herkesi görür (super_admin hariç)
        query = query.neq('role', 'super_admin'); 
     } else {
-       // Normal admin sadece kendi altındaki personeli görür (Bu mantığı backend'de veya RLS ile yönetmek daha doğru ama şimdilik filtreliyoruz)
-       // Not: Eğer çoklu şube varsa burada store_id filtresi gerekebilir.
-       query = query.neq('role', 'super_admin').neq('role', 'admin'); 
+       // Normal adminler sadece kendi mağazalarını görür (Zaten RLS bunu sağlar ama garanti olsun)
+       // RLS (Row Level Security) devrede olduğu için, backend zaten filtreler.
+       query = query.neq('role', 'super_admin'); 
     }
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) {
+        toast.error("Veri çekilemedi: " + error.message);
+    }
+    
     if (data) {
       setUsers(data);
       if (data.length > 0 && !selectedUser) setSelectedUser(data[0]);
@@ -69,9 +74,6 @@ export default function TeamPage() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    
-    // YENİ: Şehir verisinin backend'e gittiğinden emin oluyoruz.
-    // Not: actions/auth.ts dosyanızda 'city' verisini alıp profile tablosuna yazan kodun olması gerekir.
     
     let result;
     if (editingUser) {
@@ -128,13 +130,13 @@ export default function TeamPage() {
              <button onClick={() => setSidebarOpen(true)} className="md:hidden text-slate-600"><Menu/></button>
              <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                <Users className="text-indigo-600" /> 
-               {isSuperAdmin ? 'Mağaza Yöneticileri & Ekip' : 'Personel Yönetimi'}
+               {isSuperAdmin ? 'Zincir Yönetimi & Ekip' : 'Personel Yönetimi'}
              </h1>
            </div>
            
            {!isFormOpen && (
              <button onClick={() => setIsFormOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-lg shadow-indigo-500/20">
-               <UserPlus size={18}/> Yeni Kayıt
+               <UserPlus size={18}/> {isSuperAdmin ? 'Yeni Yönetici / Şube' : 'Yeni Personel'}
              </button>
            )}
         </header>
@@ -146,7 +148,7 @@ export default function TeamPage() {
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="text-lg font-bold flex items-center gap-2 text-indigo-700">
                     {editingUser ? <Pencil size={20}/> : <BadgeCheck size={20}/>}
-                    {editingUser ? 'Personeli Düzenle' : 'Yeni Personel Ekle'}
+                    {editingUser ? 'Personeli Düzenle' : 'Yeni Kayıt Ekle'}
                   </h3>
                   <button onClick={handleCancel} className="text-slate-400 hover:text-red-500 transition"><XCircle size={24}/></button>
                 </div>
@@ -171,7 +173,6 @@ export default function TeamPage() {
                     <input name="password" type="text" required={!editingUser} minLength={6} placeholder={editingUser ? "******" : ""} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 transition"/>
                   </div>
 
-                  {/* 👇 YENİ EKLENEN ŞEHİR SEÇİMİ */}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Şube / Bölge (Şehir)</label>
                     <div className="relative">
@@ -186,7 +187,6 @@ export default function TeamPage() {
                             ))}
                         </select>
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-1">* Radar sistemi bu şehre göre çalışacaktır.</p>
                   </div>
                   
                   <div>
@@ -194,8 +194,13 @@ export default function TeamPage() {
                     <select name="role" defaultValue={editingUser?.role || 'tezgahtar'} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl outline-none focus:border-indigo-500 transition cursor-pointer">
                       <option value="tezgahtar">Tezgahtar (Sadece Satış)</option>
                       <option value="personel">Personel (Stok + Satış)</option>
-                      {isSuperAdmin && <option value="admin">MAĞAZA YÖNETİCİSİ</option>}
+                      {isSuperAdmin && <option value="admin">MAĞAZA YÖNETİCİSİ (YENİ ŞUBE AÇAR)</option>}
                     </select>
+                    {isSuperAdmin && (
+                        <p className="text-[10px] text-amber-600 mt-1 font-bold">
+                            * 'Mağaza Yöneticisi' seçerseniz, bu kişi için otomatik olarak yeni bir mağaza açılacaktır.
+                        </p>
+                    )}
                   </div>
                   
                   <div className="flex gap-3 mt-6">
@@ -211,7 +216,7 @@ export default function TeamPage() {
                 {/* SOL LİSTE */}
                 <div className="w-full lg:w-1/3 bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-sm">
                    <div className="p-4 bg-slate-50 border-b font-bold text-slate-500 text-xs uppercase flex justify-between">
-                      <span>{isSuperAdmin ? 'Mağazalar & Ekip' : 'Ekip Listesi'} ({users.length})</span>
+                      <span>{isSuperAdmin ? 'Tüm Şubeler & Ekip' : 'Ekip Listesi'} ({users.length})</span>
                    </div>
                    <div className="overflow-y-auto flex-1 p-2 space-y-2 custom-scrollbar">
                       {users.length === 0 ? (
@@ -221,21 +226,21 @@ export default function TeamPage() {
                         </div>
                       ) : users.map(user => (
                         <div key={user.id} className={`p-3 rounded-xl border transition flex items-center justify-between group cursor-pointer ${selectedUser?.id === user.id ? 'bg-indigo-50 border-indigo-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`} onClick={() => setSelectedUser(user)}>
-                           <div>
-                             <p className="font-bold text-slate-800">{user.full_name || 'İsimsiz'}</p>
-                             <div className="flex items-center gap-2 mt-1">
-                                 <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : user.role === 'personel' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
+                           <div className="flex-1 min-w-0">
+                             <p className="font-bold text-slate-800 truncate">{user.full_name || 'İsimsiz'}</p>
+                             <div className="flex flex-wrap items-center gap-1 mt-1">
+                                 <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase shrink-0 ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : user.role === 'personel' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
                                      {user.role === 'admin' ? 'Yönetici' : user.role}
                                  </span>
-                                 {/* LİSTEDE ŞEHİR GÖSTERİMİ */}
-                                 {user.city && (
-                                     <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
-                                         <MapPin size={10}/> {user.city}
-                                     </span>
+                                 {/* MAĞAZA ADI GÖSTERİMİ */}
+                                 {isSuperAdmin && user.stores && (
+                                    <span className="text-[10px] text-slate-500 flex items-center gap-0.5 bg-slate-50 px-1 rounded border border-slate-100 truncate max-w-full">
+                                        <Store size={10}/> {user.stores.name}
+                                    </span>
                                  )}
                              </div>
                            </div>
-                           <div className="flex gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+                           <div className="flex gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity pl-2">
                               <button onClick={(e) => { e.stopPropagation(); handleEditClick(user); }} className="p-2 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition"><Pencil size={14}/></button>
                               <button onClick={(e) => { e.stopPropagation(); handleDelete(user.id); }} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"><Trash2 size={14}/></button>
                            </div>
@@ -254,8 +259,9 @@ export default function TeamPage() {
                            </div>
                            <div>
                                <h2 className="text-xl font-bold text-slate-800">{selectedUser.full_name}</h2>
-                               <div className="flex items-center gap-3 text-sm text-slate-500 mt-1">
+                               <div className="flex flex-col sm:flex-row sm:items-center gap-2 text-sm text-slate-500 mt-1">
                                    <span className="flex items-center gap-1"><Shield size={12}/> {selectedUser.role.toUpperCase()}</span>
+                                   {selectedUser.stores && <span className="flex items-center gap-1 text-indigo-600 font-medium"><Building2 size={12}/> {selectedUser.stores.name}</span>}
                                    {selectedUser.city && <span className="flex items-center gap-1"><MapPin size={12}/> {selectedUser.city}</span>}
                                </div>
                            </div>
