@@ -2,14 +2,10 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
+  // Gidilen yol (Path)
   const path = request.nextUrl.pathname;
 
-  // 🔥 İŞTE ÇÖZÜM BURADA:
-  // Eğer gidilen yol "/landing" veya "/login" ile başlıyorsa KARIŞMA (return next).
-  if (path.startsWith("/landing") || path.startsWith("/login") || path.startsWith("/auth")) {
-    return NextResponse.next();
-  }
-
+  // Başlangıç yanıtı
   let response = NextResponse.next({
     request: { headers: request.headers },
   });
@@ -22,41 +18,63 @@ export async function middleware(request: NextRequest) {
         get(name: string) {
           return request.cookies.get(name)?.value;
         },
+        // 👇 DÜZELTME BURADA:
         set(name: string, value: string, options: CookieOptions) {
+          // Request'e yazarken obje formatı zorunlu
           request.cookies.set({ name, value, ...options });
+          
           response = NextResponse.next({
             request: { headers: request.headers },
           });
-          response.cookies.set({ name, value, ...options });
+          
+          // Response'a yazarken 3 parametreli kullanarak Type hatasını aşıyoruz
+          response.cookies.set(name, value, options);
         },
         remove(name: string, options: CookieOptions) {
+          // Request'ten silerken boş değer atıyoruz
           request.cookies.set({ name, value: "", ...options });
+          
           response = NextResponse.next({
             request: { headers: request.headers },
           });
-          response.cookies.set({ name, value: "", ...options });
+          
+          // Response'dan silerken yine 3 parametreli yöntem
+          response.cookies.set(name, "", options);
         },
       },
     }
   );
 
+  // Kullanıcıyı kontrol et
   const { data: { user } } = await supabase.auth.getUser();
 
-  // KURAL 1: Kullanıcı yoksa ve korumalı alandaysa -> Login'e at
-  if (!user && path !== "/login") {
-    return NextResponse.redirect(new URL("/login", request.url));
-  }
+  // --- 🛡️ GÜVENLİK KURALLARI 🛡️ ---
 
-  // KURAL 2: Kullanıcı varsa ve Login'e gitmeye çalışıyorsa -> Ana Sayfaya (Dashboard) at
+  // 1. Eğer kullanıcı ZATEN giriş yapmışsa ve Login sayfasına gitmeye çalışıyorsa
+  // Onu direkt içeri (Dashboard'a) al.
   if (user && path === "/login") {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
+  // 2. Eğer kullanıcı GİRİŞ YAPMAMIŞSA ve şu an Login sayfasında DEĞİLSE
+  // Onu zorla Login sayfasına gönder.
+  if (!user && path !== "/login") {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // Diğer durumlarda geçişe izin ver
   return response;
 }
 
 export const config = {
   matcher: [
+    /*
+     * Aşağıdakiler HARİÇ tüm yollarda bu korumayı çalıştır:
+     * - _next/static (statik dosyalar)
+     * - _next/image (resim optimizasyonu)
+     * - favicon.ico (ikon)
+     * - public klasöründeki resimler (.png, .jpg vs.)
+     */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
