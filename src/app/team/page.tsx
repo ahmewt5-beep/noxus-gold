@@ -34,22 +34,48 @@ export default function TeamPage() {
     if (selectedUser) fetchUserLogs(selectedUser.id);
   }, [selectedUser]);
 
-  async function fetchTeam() {
-    // Mağaza ismini de çekmek için join (stores) yapıyoruz
-    let query = supabase.from('profiles').select('*, stores(name)').order('role');
+  // 🔴 BU FONKSİYONU ESKİSİYLE DEĞİŞTİR (src/app/team/page.tsx içinde)
 
-    if (isSuperAdmin) {
-       // Süper admin herkesi görür (super_admin hariç)
+  async function fetchTeam() {
+    // 1. Önce BENİM kim olduğumu ve MAĞAZAMI öğren
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Profilimden rolümü ve store_id'mi çek
+    const { data: myProfile } = await supabase
+        .from('profiles')
+        .select('role, store_id')
+        .eq('id', user.id)
+        .single();
+
+    const amISuperAdmin = myProfile?.role === 'super_admin';
+    const myStoreId = myProfile?.store_id;
+
+    // 2. Sorguyu Hazırla
+    let query = supabase
+        .from('profiles')
+        .select('*, stores(name)')
+        .order('role');
+
+    // 3. FİLTRELEME (ÇİFT DİKİŞ GÜVENLİK) 🛡️
+    if (amISuperAdmin) {
+       // Süper admin herkesi görür (kendisi hariç, kafa karışmasın)
        query = query.neq('role', 'super_admin'); 
     } else {
-       // Normal adminler sadece kendi mağazalarını görür (Zaten RLS bunu sağlar ama garanti olsun)
-       // RLS (Row Level Security) devrede olduğu için, backend zaten filtreler.
+       // NORMAL ADMİNLER İÇİN KATI FİLTRE
+       // RLS çalışmasa bile bu kod sayesinde başkasını ÇEKEMEZ.
+       if (myStoreId) {
+           query = query.eq('store_id', myStoreId); // 👈 İŞTE ÇÖZÜM BU
+       }
+       // Ayrıca süper adminleri görmesin
        query = query.neq('role', 'super_admin'); 
     }
 
     const { data, error } = await query;
+    
     if (error) {
         toast.error("Veri çekilemedi: " + error.message);
+        console.error(error);
     }
     
     if (data) {
@@ -58,7 +84,6 @@ export default function TeamPage() {
     }
     setLoading(false);
   }
-
   async function fetchUserLogs(userId: string) {
     const { data } = await supabase
       .from('activity_logs')

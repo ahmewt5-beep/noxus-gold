@@ -2,7 +2,7 @@
 import { 
   LayoutDashboard, Users, Package, Wallet, PieChart, 
   Settings, LogOut, Hexagon, X, ShieldCheck, UserCog,
-  ScanBarcode, Radio, Siren 
+  ScanBarcode, Radio, Siren, Contact
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -18,8 +18,103 @@ interface SidebarProps {
 export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { canViewVault, canManageTeam, isStaff } = useAuth(); 
+  
+  // Auth'dan rolü çekiyoruz. (Eğer useAuth hook'unda role dönmüyorsa eklemen gerekir)
+  // Şimdilik senin yolladığın kodda rol yoksa diye güvenli bir fallback yapıyorum.
+  const { role } = useAuth(); 
 
+  // --- 🛡️ MENÜ YAPILANDIRMASI ---
+  const menuConfig = [
+    {
+      title: "Genel",
+      items: [
+        { 
+          text: "Genel Bakış", 
+          href: "/", 
+          icon: LayoutDashboard, 
+          roles: ['super_admin', 'admin', 'personel', 'tezgahtar'] // Herkes
+        },
+        { 
+          text: "Cari Hesaplar", 
+          href: "/customers", 
+          icon: Users, 
+          roles: ['super_admin', 'admin', 'personel', 'tezgahtar'] // Herkes
+        },
+        { 
+          text: "Vitrin Sayımı", 
+          href: "/showcase", 
+          icon: ShieldCheck, 
+          roles: ['super_admin', 'admin', 'personel'] // Tezgahtar yapamaz
+        },
+      ]
+    },
+    {
+      title: "Operasyonel",
+      items: [
+        { 
+          text: "Stok & Maden", 
+          href: "/stock", 
+          icon: Package, 
+          roles: ['super_admin', 'admin', 'personel'] // Tezgahtar göremez
+        },
+        { 
+          text: "RFID Sayım", 
+          href: "/rfid-count", 
+          icon: Radio, 
+          roles: ['super_admin', 'admin', 'personel'] 
+        },
+        { 
+          text: "Hızlı Giriş", 
+          href: "/bulk-entry", 
+          icon: ScanBarcode, 
+          roles: ['super_admin', 'admin', 'personel'] 
+        },
+      ]
+    },
+    {
+      title: "Finans & Yönetim",
+      items: [
+        { 
+          text: "Kasa İşlemleri", 
+          href: "/vault", 
+          icon: Wallet, 
+          roles: ['super_admin', 'admin'] // Sadece Yöneticiler
+        },
+        { 
+          text: "Raporlar", 
+          href: "/reports", 
+          icon: PieChart, 
+          roles: ['super_admin', 'admin'] 
+        },
+        { 
+          text: "Radar (İstihbarat)", 
+          href: "/radar", 
+          icon: Siren, 
+          className: "text-red-500 animate-pulse", // Özel stil
+          roles: ['super_admin', 'admin', 'personel', 'tezgahtar'] 
+        },
+      ]
+    },
+    {
+      title: "Sistem",
+      items: [
+        { 
+          text: "Ekip Yönetimi", 
+          href: "/team", 
+          icon: UserCog, 
+          roles: ['super_admin', 'admin'] 
+        },
+        { 
+          text: "Ayarlar", 
+          href: "/settings", 
+          icon: Settings, 
+          roles: ['super_admin', 'admin'] 
+        },
+      ]
+    }
+  ];
+
+  // --- LOGOUT FONKSİYONU (Senin kodun, hata vermez) ---
   const handleLogout = async () => {
     try {
       const { error } = await supabase.auth.signOut();
@@ -44,6 +139,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       />
 
       <aside className={`fixed md:relative inset-y-0 left-0 z-[50] bg-slate-900 text-white transition-all duration-300 flex flex-col shadow-2xl shrink-0 h-screen ${isOpen ? 'translate-x-0 w-72 p-4' : '-translate-x-full md:translate-x-0 md:w-20 md:p-2 md:items-center'}`}>
+        
+        {/* HEADER & LOGO */}
         <div className={`flex items-center justify-between mb-10 px-2 ${!isOpen && 'md:justify-center'}`}>
             <Link href="/" className="flex items-center gap-3 cursor-pointer group">
                 <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30 group-hover:scale-110 transition shrink-0">
@@ -59,51 +156,37 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
             <button onClick={() => setIsOpen(false)} className="md:hidden text-slate-400 hover:text-white"><X size={24}/></button>
         </div>
 
-        <nav className="flex-1 space-y-2 overflow-y-auto custom-scrollbar">
-          {/* 1. ÜST BÖLÜM */}
-          <SidebarItem icon={<LayoutDashboard size={20} />} text="Genel Bakış" href="/" isOpen={isOpen} active={isActive("/")} onClick={handleLinkClick} />
-          <SidebarItem icon={<Users size={20} />} text="Cari Hesaplar" href="/customers" isOpen={isOpen} active={isActive("/customers")} onClick={handleLinkClick} />
-          <SidebarItem icon={<ShieldCheck size={20} />} text="Vitrin Sayımı" href="/showcase" isOpen={isOpen} active={isActive("/showcase")} onClick={handleLinkClick} />
+        {/* --- DİNAMİK MENÜ ALANI --- */}
+        <nav className="flex-1 space-y-6 overflow-y-auto custom-scrollbar">
+          {menuConfig.map((group, groupIndex) => {
+            // Bu grupta, kullanıcının rolüne uygun en az 1 item var mı?
+            const visibleItems = group.items.filter(item => item.roles.includes(role || ''));
+            
+            if (visibleItems.length === 0) return null; // Eğer yoksa grup başlığını da gösterme
 
-          {/* 2. OPERASYONEL BÖLÜM (Personel ve Admin Görür) */}
-          {(canViewVault || isStaff) && (
-             <>
-               <SidebarItem icon={<Package size={20} />} text="Stok & Maden" href="/stock" isOpen={isOpen} active={isActive("/stock")} onClick={handleLinkClick} />
-               <SidebarItem icon={<Radio size={20} />} text="RFID Tepsi Sayımı" href="/rfid-count" isOpen={isOpen} active={isActive("/rfid-count")} onClick={handleLinkClick} />
-               <SidebarItem icon={<ScanBarcode size={20} />} text="Hızlı Giriş" href="/bulk-entry" isOpen={isOpen} active={isActive("/bulk-entry")} onClick={handleLinkClick} />
-             </>
-          )}
-
-          {/* 3. FİNANSAL BÖLÜM (Sadece Admin Görür) */}
-          {canViewVault && (
-            <>
-              <SidebarItem icon={<Wallet size={20} />} text="Kasa İşlemleri" href="/vault" isOpen={isOpen} active={isActive("/vault")} onClick={handleLinkClick} />
-              <SidebarItem icon={<PieChart size={20} />} text="Finansal Raporlar" href="/reports" isOpen={isOpen} active={isActive("/reports")} onClick={handleLinkClick} />
-            </>
-          )}
-
-          {/* 4. RADAR (İSTİHBARAT) - Finansal Raporların Altına Eklendi */}
-          {/* Not: Herkes görsün istiyorsan buraya, sadece admin görsün istiyorsan üstteki süslü parantezin içine alabilirsin. Şu an herkes görüyor. */}
-          <div className="pt-2"> {/* Hafif bir boşluk bıraktık ayrı dursun diye */}
-            <SidebarItem 
-                icon={<Siren size={20} className="text-red-500 animate-pulse" />} 
-                text="Radar (İstihbarat)" 
-                href="/radar" 
-                isOpen={isOpen} 
-                active={isActive("/radar")} 
-                onClick={handleLinkClick} 
-            />
-          </div>
-
+            return (
+              <div key={groupIndex}>
+                {isOpen && <p className="px-4 text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest">{group.title}</p>}
+                <div className="space-y-2">
+                  {visibleItems.map((item, itemIndex) => (
+                    <SidebarItem 
+                      key={itemIndex}
+                      icon={<item.icon size={20} className={item.className} />} 
+                      text={item.text} 
+                      href={item.href} 
+                      isOpen={isOpen} 
+                      active={isActive(item.href)} 
+                      onClick={handleLinkClick} 
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </nav>
 
+        {/* FOOTER (LOGOUT) */}
         <div className="border-t border-slate-800 pt-4 space-y-2 shrink-0">
-          {canManageTeam && (
-             <>
-               <SidebarItem icon={<UserCog size={20} />} text="Ekip Yönetimi" href="/team" isOpen={isOpen} active={isActive("/team")} onClick={handleLinkClick} />
-               <SidebarItem icon={<Settings size={20} />} text="Sistem Ayarları" href="/settings" isOpen={isOpen} active={isActive("/settings")} onClick={handleLinkClick} />
-             </>
-          )}
           <button onClick={() => handleLogout()} className={`w-full flex items-center gap-4 p-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-all duration-200 group ${!isOpen && 'justify-center'}`}>
             <LogOut size={20} />
             {isOpen && <span className="font-medium text-sm animate-in fade-in">Çıkış Yap</span>}
