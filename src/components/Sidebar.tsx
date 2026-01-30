@@ -2,13 +2,14 @@
 import { 
   LayoutDashboard, Users, Package, Wallet, PieChart, 
   Settings, LogOut, Hexagon, X, ShieldCheck, UserCog,
-  ScanBarcode, Radio, Siren, Contact
+  ScanBarcode, Radio, Siren
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { useAuth } from "./AuthProvider"; 
+import { useEffect, useState } from "react";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -19,10 +20,44 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   
-  // Auth'dan rolü çekiyoruz.
-  const { role } = useAuth(); 
+  // Auth'dan gelen genel bilgi
+  const { role, user } = useAuth(); 
+  
+  // 🔥 YENİ ÖZELLİK: Yerel Teyit Mekanizması
+  // AuthProvider gecikirse diye Sidebar kendi içinde rolü tekrar doğrular.
+  const [verifiedRole, setVerifiedRole] = useState<string | null>(null);
 
-  // --- 1. ANA MENÜ (Yukarıda, Kaydırılabilir Alan) ---
+  useEffect(() => {
+    let isMounted = true;
+
+    const verifyUserRole = async () => {
+      if (!user) return;
+      
+      // Veritabanından canlı olarak rütbeyi çek
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      if (isMounted && data && !error) {
+        // Rütbeyi hafızaya al
+        setVerifiedRole(data.role);
+      }
+    };
+
+    verifyUserRole();
+
+    return () => { isMounted = false; };
+  }, [user]); // Kullanıcı değiştiğinde (Giriş yapınca) çalışır
+
+  // 🔥 KARAR ANI:
+  // 1. Teyit edilmiş rol varsa onu kullan (En Güncel)
+  // 2. Yoksa AuthProvider'dan geleni kullan (Cache)
+  // 3. O da yoksa 'personel' varsay (Güvenli Mod)
+  const currentRole = verifiedRole || role || 'personel';
+
+  // --- 1. ANA MENÜ ---
   const mainMenuConfig = [
     {
       title: "Genel",
@@ -96,7 +131,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     }
   ];
 
-  // --- 2. ALT MENÜ (Aşağıda, Sabit Alan - Çıkış'ın Üstünde) ---
+  // --- 2. ALT MENÜ ---
   const bottomMenuConfig = [
     { 
       text: "Ekip Yönetimi", 
@@ -112,21 +147,15 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     },
   ];
 
-  // --- LOGOUT FONKSİYONU ---
   const handleLogout = async () => {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
-      
       toast.success("Çıkış yapılıyor...");
-      
-      // Önce router önbelleğini temizle, sonra yönlendir
       router.refresh();
       router.replace('/login'); 
-      
     } catch (error) { 
-      toast.error("Çıkış yapılırken hata oluştu."); 
-      console.error(error);
+      toast.error("Hata oluştu."); 
     }
   };
 
@@ -136,8 +165,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     if (typeof window !== 'undefined' && window.innerWidth < 768) setIsOpen(false);
   };
 
-  // Helper: Kullanıcının rolü bu item'ı görmeye yetiyor mu?
-  const canSee = (allowedRoles: string[]) => allowedRoles.includes(role || '');
+  // Helper: Rütbe kontrolü (Artık currentRole kullanıyor)
+  const canSee = (allowedRoles: string[]) => allowedRoles.includes(currentRole);
 
   return (
     <>
@@ -148,7 +177,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
 
       <aside className={`fixed md:relative inset-y-0 left-0 z-[50] bg-slate-900 text-white transition-all duration-300 flex flex-col shadow-2xl shrink-0 h-screen ${isOpen ? 'translate-x-0 w-72 p-4' : '-translate-x-full md:translate-x-0 md:w-20 md:p-2 md:items-center'}`}>
         
-        {/* HEADER & LOGO */}
+        {/* HEADER */}
         <div className={`flex items-center justify-between mb-8 px-2 ${!isOpen && 'md:justify-center'}`}>
             <Link href="/" className="flex items-center gap-3 cursor-pointer group">
                 <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30 group-hover:scale-110 transition shrink-0">
@@ -164,7 +193,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
             <button onClick={() => setIsOpen(false)} className="md:hidden text-slate-400 hover:text-white"><X size={24}/></button>
         </div>
 
-        {/* --- DİNAMİK ANA MENÜ (Scrollable) --- */}
+        {/* --- MENU --- */}
         <nav className="flex-1 space-y-6 overflow-y-auto custom-scrollbar">
           {mainMenuConfig.map((group, groupIndex) => {
             const visibleItems = group.items.filter(item => canSee(item.roles));
@@ -191,10 +220,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
           })}
         </nav>
 
-        {/* --- SABİT ALT MENÜ (Ekip & Ayarlar & Çıkış) --- */}
+        {/* --- BOTTOM --- */}
         <div className="border-t border-slate-800 pt-4 space-y-2 shrink-0 mt-auto">
-          
-          {/* Ekip ve Ayarlar Buraya Taşındı */}
           {bottomMenuConfig.filter(item => canSee(item.roles)).map((item, idx) => (
              <SidebarItem 
                 key={idx}
@@ -207,7 +234,6 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
               />
           ))}
 
-          {/* Çıkış Butonu */}
           <button onClick={() => handleLogout()} className={`w-full flex items-center gap-4 p-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-all duration-200 group ${!isOpen && 'justify-center'}`}>
             <LogOut size={20} />
             {isOpen && <span className="font-medium text-sm animate-in fade-in">Çıkış Yap</span>}

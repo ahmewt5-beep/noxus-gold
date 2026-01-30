@@ -85,7 +85,7 @@ export default function Dashboard() {
     }
   }, [weight, isConnected, currency, isModalOpen]);
 
-  // VERİ ÇEKME
+  // --- 🔥 GÜNCELLENMİŞ VERİ ÇEKME VE HESAPLAMA ---
   const fetchInitialData = useCallback(async () => {
     try {
       // 1. Önce Hangi Mağazada Olduğumuzu Öğrenelim
@@ -101,21 +101,80 @@ export default function Dashboard() {
           setStoreInfo({ id: profile.store_id, name: profile.stores?.name || "Bilinmeyen Mağaza" });
       }
 
-      // 2. Verileri Çek (RLS sayesinde sadece bu mağazanın verileri gelir)
-      const { data: custData } = await supabase.from('customers').select('*').order('full_name');
+      // 2. Müşterileri Çek
+      const { data: custData } = await supabase.from('customers').select('*').eq('store_id', currentStoreId).order('full_name');
       if (custData) setCustomers(custData);
 
-      const { data: prodData } = await supabase.from('products').select('*').eq('is_active', true).order('name');
+      // 3. Ürünleri Çek ve Stok Has Değerini Hesapla
+      const { data: prodData } = await supabase.from('products').select('*').eq('store_id', currentStoreId).eq('is_active', true).order('name');
+      let totalStock = 0;
       if (prodData) {
         setProducts(prodData);
-        const totalStock = prodData.reduce((acc, p) => math.add(acc, math.mul(p.stock_gram, p.purity)), 0);
-        setStats(prev => ({ ...prev, goldStock: totalStock }));
+        // Stoktaki toplam Has altın değeri (Gram * Milyem)
+        totalStock = prodData.reduce((acc, p) => math.add(acc, math.mul(p.stock_gram, p.purity)), 0);
       }
 
-      const { data: allTrx } = await supabase.from('transactions').select('*, customers(full_name)').order('created_at', { ascending: false }).limit(20);
-      if (allTrx) setTransactions(allTrx as any);
+      // 4. Son İşlemleri Çek (Listeleme için)
+      const { data: recentTrx } = await supabase
+        .from('transactions')
+        .select('*, customers(full_name)')
+        .eq('store_id', currentStoreId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      
+      if (recentTrx) setTransactions(recentTrx as any);
 
-    } catch (error) { console.error(error); } finally { setLoading(false); }
+      // 5. 🔥 FİNANSAL HESAPLAMA (TÜM KASA DURUMU) 🔥
+      const { data: allTransactions } = await supabase
+        .from('transactions')
+        .select('type, price, currency, created_at')
+        .eq('store_id', currentStoreId);
+
+      let calcCiro = 0;
+      let calcTL = 0;
+      let calcUSD = 0;
+
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      if (allTransactions) {
+        allTransactions.forEach(t => {
+            const amount = Number(t.price) || 0;
+            const isToday = t.created_at.startsWith(todayStr);
+
+            // SATIS (+), TAHSILAT (-)
+            const multiplier = t.type === 'SATIS' ? 1 : -1; 
+
+            // Günlük Ciro (Sadece bugün yapılan satışlar)
+            if (t.type === 'SATIS' && isToday) {
+                calcCiro += amount;
+            }
+
+            // Kasa TL
+            if (t.currency === 'TL' || t.currency === 'Nakit') {
+                calcTL += amount * multiplier;
+            }
+
+            // Kasa USD
+            if (t.currency === 'USD') {
+                calcUSD += amount * multiplier;
+            }
+        });
+      }
+
+      // İstatistikleri Güncelle
+      setStats({
+          dailyCiro: calcCiro,
+          cashTL: calcTL,
+          cashUSD: calcUSD,
+          goldStock: totalStock
+      });
+
+    } catch (error) { 
+        console.error(error); 
+        toast.error("Veriler güncellenemedi.");
+    } finally { 
+        setLoading(false); 
+    }
   }, []);
 
   useEffect(() => { fetchInitialData(); }, [fetchInitialData]);
@@ -195,9 +254,9 @@ export default function Dashboard() {
 
     try {
         const promises = cart.map(async (item) => {
-            // 1. Transaction Ekle (Store ID ile)
+            // 1. Transaction Ekle
             await supabase.from('transactions').insert({
-                store_id: storeInfo.id, // 👈 KRİTİK: Satış bu mağazaya yazılıyor
+                store_id: storeInfo.id,
                 customer_id: customerId,
                 type: item.type,
                 product_name: item.product_name,
@@ -208,11 +267,10 @@ export default function Dashboard() {
                 currency: currency 
             });
 
-            // 2. Stok Düş (Store ID ile)
+            // 2. Stok Düş
             if (item.product_id) {
                 const stockChange = item.type === 'SATIS' ? -item.gram : item.gram;
                 
-                // RLS olduğu için sadece kendi mağazasındaki ürünü bulur
                 const { data: prod } = await supabase.from('products').select('stock_gram').eq('id', item.product_id).single();
                 
                 if(prod) {
@@ -221,9 +279,9 @@ export default function Dashboard() {
                     }).eq('id', item.product_id);
                 }
 
-                // Envanter Logu (Store ID ile)
+                // Envanter Logu
                 await supabase.from('inventory_logs').insert({ 
-                    store_id: storeInfo.id, // 👈 KRİTİK
+                    store_id: storeInfo.id,
                     product_id: item.product_id, 
                     type: item.type === 'SATIS' ? 'CIKIS' : 'GIRIS', 
                     gram_change: stockChange, 
@@ -265,10 +323,10 @@ export default function Dashboard() {
             }).eq('id', customerId);
         }
 
-        // 4. Aktivite Logu (Store ID ile)
+        // 4. Aktivite Logu
         if (user) {
             await supabase.from('activity_logs').insert({
-                store_id: storeInfo.id, // 👈 KRİTİK
+                store_id: storeInfo.id,
                 user_id: user.id,
                 action_type: 'SATIŞ',
                 description: `${currentCust?.full_name} işlem yapıldı. Detay: ${logSummary}`,
@@ -283,7 +341,9 @@ export default function Dashboard() {
         toast.success("Satış tamamlandı.");
         setModalOpen(false);
         setCart([]); 
-        fetchInitialData();
+        
+        // İşlem bitince verileri tazeleyip kasayı güncelle
+        await fetchInitialData();
 
     } catch (error: any) {
         toast.error("Hata: " + error.message);
@@ -339,32 +399,32 @@ export default function Dashboard() {
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 lg:gap-8">
-             <div className="xl:col-span-2 bg-white p-4 lg:p-6 rounded-2xl shadow-sm border border-slate-200 h-64 lg:h-96">
-                <h3 className="font-bold mb-4">Altın Trendi</h3>
-                {isMounted && (
+              <div className="xl:col-span-2 bg-white p-4 lg:p-6 rounded-2xl shadow-sm border border-slate-200 h-64 lg:h-96">
+                 <h3 className="font-bold mb-4">Altın Trendi</h3>
+                 {isMounted && (
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={chartData}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" /><XAxis dataKey="name" axisLine={false} tickLine={false} /><YAxis axisLine={false} tickLine={false} domain={['dataMin - 10', 'dataMax + 10']} width={30} /><Tooltip /><Line type="monotone" dataKey="kur" stroke="#f59e0b" strokeWidth={3} dot={{r: 4, fill: '#f59e0b'}} /></LineChart>
                     </ResponsiveContainer>
-                )}
-             </div>
-             
-             {/* SON HAREKETLER */}
-             <div className="bg-white p-4 lg:p-6 rounded-2xl shadow-sm border border-slate-200 flex-1 flex flex-col min-h-[300px]">
-                <h3 className="font-bold mb-4 flex items-center gap-2"><History size={18}/> Son Hareketler</h3>
-                <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
-                  {transactions.length === 0 ? <p className="text-slate-400 text-sm p-4">İşlem yok.</p> : transactions.map(t => (
-                    <div key={t.id} className="flex justify-between items-center text-sm p-3 hover:bg-slate-50 rounded-xl transition border border-transparent hover:border-slate-100 cursor-pointer group">
-                      <div className="flex items-center gap-3 overflow-hidden">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${t.type==='SATIS'?'bg-red-100 text-red-600':'bg-emerald-100 text-emerald-600'}`}>{t.type==='SATIS'?'S':'A'}</div>
-                        <div className="truncate"><p className="font-bold text-slate-700 truncate">{(t as any).customers?.full_name || 'Kasa İşlemi'}</p><p className="text-xs text-slate-400 truncate">{t.product_name}</p></div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                          <span className={`font-mono font-bold ${t.type === 'SATIS' ? 'text-red-600' : 'text-emerald-600'}`}>{t.gram > 0 ? t.gram + 'gr' : t.price + '₺'}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-             </div>
+                 )}
+              </div>
+              
+              {/* SON HAREKETLER */}
+              <div className="bg-white p-4 lg:p-6 rounded-2xl shadow-sm border border-slate-200 flex-1 flex flex-col min-h-[300px]">
+                 <h3 className="font-bold mb-4 flex items-center gap-2"><History size={18}/> Son Hareketler</h3>
+                 <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
+                   {transactions.length === 0 ? <p className="text-slate-400 text-sm p-4">İşlem yok.</p> : transactions.map(t => (
+                     <div key={t.id} className="flex justify-between items-center text-sm p-3 hover:bg-slate-50 rounded-xl transition border border-transparent hover:border-slate-100 cursor-pointer group">
+                       <div className="flex items-center gap-3 overflow-hidden">
+                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${t.type==='SATIS'?'bg-red-100 text-red-600':'bg-emerald-100 text-emerald-600'}`}>{t.type==='SATIS'?'S':'A'}</div>
+                         <div className="truncate"><p className="font-bold text-slate-700 truncate">{(t as any).customers?.full_name || 'Kasa İşlemi'}</p><p className="text-xs text-slate-400 truncate">{t.product_name}</p></div>
+                       </div>
+                       <div className="flex items-center gap-2 shrink-0">
+                           <span className={`font-mono font-bold ${t.type === 'SATIS' ? 'text-red-600' : 'text-emerald-600'}`}>{t.gram > 0 ? t.gram + 'gr' : t.price + '₺'}</span>
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+              </div>
           </div>
         </main>
       </div>
@@ -452,18 +512,18 @@ export default function Dashboard() {
                       </div>
                   ) : cart.map((item) => (
                       <div key={item.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100 group">
-                         <div>
-                            <p className="font-bold text-slate-700 text-sm">{item.product_name}</p>
-                            <p className="text-xs text-slate-400 flex gap-2">
-                               <span className={item.type === 'SATIS' ? 'text-red-500' : 'text-emerald-500'}>{item.type}</span>
-                               <span>•</span>
-                               <span>{item.gram > 0 ? `${item.gram} gr` : `${item.price} ${item.product_name}`}</span>
-                            </p>
-                         </div>
-                         <div className="flex items-center gap-3">
-                            {item.has_equivalent > 0 && <span className="font-mono text-xs font-bold text-amber-600">{item.has_equivalent.toFixed(2)} Has</span>}
-                            <button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-red-500 transition"><Trash2 size={16}/></button>
-                         </div>
+                          <div>
+                             <p className="font-bold text-slate-700 text-sm">{item.product_name}</p>
+                             <p className="text-xs text-slate-400 flex gap-2">
+                                <span className={item.type === 'SATIS' ? 'text-red-500' : 'text-emerald-500'}>{item.type}</span>
+                                <span>•</span>
+                                <span>{item.gram > 0 ? `${item.gram} gr` : `${item.price} ${item.product_name}`}</span>
+                             </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                             {item.has_equivalent > 0 && <span className="font-mono text-xs font-bold text-amber-600">{item.has_equivalent.toFixed(2)} Has</span>}
+                             <button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-red-500 transition"><Trash2 size={16}/></button>
+                          </div>
                       </div>
                   ))}
                </div>
