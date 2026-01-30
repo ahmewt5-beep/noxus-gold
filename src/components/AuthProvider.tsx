@@ -27,81 +27,105 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const isSuperAdmin = role === 'super_admin';
   const isAdmin = role === 'admin';
   const isPersonel = role === 'personel';
-  // Tezgahtar sadece 'tezgahtar'dır.
 
   // Yetki Grupları
-  const canManageTeam = isSuperAdmin || isAdmin; // Ekip yönetimi
-  const canViewVault = isSuperAdmin || isAdmin; // Kasa ve Rapor
-  const isStaff = isSuperAdmin || isAdmin || isPersonel; // Stok yönetimi
+  const canManageTeam = isSuperAdmin || isAdmin;
+  const canViewVault = isSuperAdmin || isAdmin;
+  const isStaff = isSuperAdmin || isAdmin || isPersonel;
 
+  // --- 1. Kullanıcı Bilgisini Getir ---
+  const fetchUserProfile = async (sessionUser: any) => {
+    try {
+      // Profil tablosundan rolü çek
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', sessionUser.id)
+        .single();
+
+      if (error || !profile) {
+        console.error("Profil Bulunamadı (RLS veya Kayıt Yok):", error);
+        // Eğer giriş yapmış ama profili yoksa, sistem bozulmasın diye varsayılan rol ver
+        // Veya güvenlik istersen: await supabase.auth.signOut();
+        setRole("personel"); 
+      } else {
+        setRole(profile.role);
+      }
+      
+      setUser(sessionUser);
+
+    } catch (err) {
+      console.error("Auth Kritik Hata:", err);
+      setRole(null);
+    }
+  };
+
+  // --- 2. Başlangıç Kontrolü ---
   useEffect(() => {
-    // 1. Mevcut Oturumu Kontrol Et
-    const checkUser = async () => {
+    let mounted = true;
+
+    const initializeAuth = async () => {
       try {
+        // Mevcut oturumu al
         const { data: { session } } = await supabase.auth.getSession();
-        
+
         if (session?.user) {
-          setUser(session.user);
-          // 🔥 KRİTİK: Rolü Metadata'dan değil, Canlı Tablodan Çek
-          await fetchRoleFromProfile(session.user.id);
+          await fetchUserProfile(session.user);
         } else {
+          // Oturum yoksa temizle
+          setUser(null);
           setRole(null);
         }
       } catch (error) {
-        console.error("Auth Error:", error);
+        console.error("Session hatası:", error);
       } finally {
-        setLoading(false);
+        // 🔥 EN ÖNEMLİ KISIM: Ne olursa olsun loading'i kapat!
+        if (mounted) setLoading(false);
       }
     };
 
-    checkUser();
+    initializeAuth();
 
-    // 2. Oturum Değişikliklerini Dinle
+    // --- 3. Oturum Değişikliklerini Dinle ---
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // console.log("Auth Olayı:", event); // Debug için açabilirsin
+
       if (session?.user) {
-        setUser(session.user);
-        await fetchRoleFromProfile(session.user.id);
+        await fetchUserProfile(session.user);
       } else {
         setUser(null);
         setRole(null);
-        router.push("/login");
+        // Sadece çıkış yapıldığında loading kapatılsın, 
+        // yönlendirmeyi middleware veya sayfalar halleder.
       }
       setLoading(false);
     });
 
     return () => {
+      mounted = false;
       authListener.subscription.unsubscribe();
     };
-  }, [router]);
-
-  // Profil tablosundan ROL çekme fonksiyonu
-  const fetchRoleFromProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', userId)
-      .single();
-    
-    if (data) {
-      console.log("🔥 GÜNCEL ROL:", data.role); // Konsoldan kontrol et
-      setRole(data.role);
-    } else {
-      console.error("Profil bulunamadı:", error);
-      setRole("tezgahtar"); // Güvenlik için varsayılan en düşük
-    }
-  };
+  }, []);
 
   const signOut = async () => {
+    setLoading(true);
     await supabase.auth.signOut();
-    setRole(null);
     setUser(null);
-    router.push("/login");
+    setRole(null);
+    router.replace("/login");
+    setLoading(false);
   };
 
+  // --- LOADING EKRANI ---
+  // Eğer hala yükleniyorsa, tüm siteyi durdurup bunu göster
   if (loading) {
     return (
-      <div className="h-screen w-full flex items-center justify-center bg-slate-900 text-white">
-        <Loader2 className="animate-spin text-indigo-500" size={48} />
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 text-white gap-4">
+        <div className="relative">
+            <div className="w-16 h-16 border-4 border-slate-800 border-t-amber-500 rounded-full animate-spin"></div>
+            <div className="absolute inset-0 flex items-center justify-center font-bold text-xs">N</div>
+        </div>
+        <p className="text-slate-400 text-sm animate-pulse">Sistem Başlatılıyor...</p>
       </div>
     );
   }
