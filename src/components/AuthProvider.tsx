@@ -23,109 +23,117 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // Rol Yetkileri
   const isSuperAdmin = role === 'super_admin';
   const isAdmin = role === 'admin';
   const isPersonel = role === 'personel';
 
-  // Yetki Grupları
   const canManageTeam = isSuperAdmin || isAdmin;
   const canViewVault = isSuperAdmin || isAdmin;
   const isStaff = isSuperAdmin || isAdmin || isPersonel;
 
-  // --- 1. Kullanıcı Bilgisini Getir ---
+  // --- Profil Çekme Fonksiyonu ---
   const fetchUserProfile = async (sessionUser: any) => {
     try {
-      // Profil tablosundan rolü çek
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('role')
         .eq('id', sessionUser.id)
-        .single();
+        .maybeSingle(); // single() yerine maybeSingle() hata patlatmaz
 
-      if (error || !profile) {
-        console.error("Profil Bulunamadı (RLS veya Kayıt Yok):", error);
-        // Eğer giriş yapmış ama profili yoksa, sistem bozulmasın diye varsayılan rol ver
-        // Veya güvenlik istersen: await supabase.auth.signOut();
-        setRole("personel"); 
-      } else {
+      if (profile) {
         setRole(profile.role);
+      } else {
+        // Profil yoksa varsayılan
+        setRole("personel");
       }
-      
       setUser(sessionUser);
-
     } catch (err) {
-      console.error("Auth Kritik Hata:", err);
-      setRole(null);
+      console.error("Profil hatası:", err);
     }
   };
 
-  // --- 2. Başlangıç Kontrolü ---
   useEffect(() => {
     let mounted = true;
 
+    // 🔥 ZAMAN AYARLI BOMBA (TIMEOUT) 🔥
+    // Eğer Supabase 3 saniye içinde cevap vermezse, yüklemeyi zorla kapat.
+    const timeBomb = setTimeout(() => {
+      if (mounted && loading) {
+        console.warn("Auth yanıt vermedi, yükleme zorla kapatılıyor...");
+        setLoading(false);
+      }
+    }, 3000); // 3 Saniye bekleme süresi
+
     const initializeAuth = async () => {
       try {
-        // Mevcut oturumu al
-        const { data: { session } } = await supabase.auth.getSession();
+        // 1. Session Kontrolü
+        const { data: { session }, error } = await supabase.auth.getSession();
+
+        if (error) throw error;
 
         if (session?.user) {
           await fetchUserProfile(session.user);
         } else {
-          // Oturum yoksa temizle
+          // Oturum yok
           setUser(null);
           setRole(null);
         }
       } catch (error) {
-        console.error("Session hatası:", error);
+        console.error("Auth Başlatma Hatası:", error);
+        // Hata durumunda kullanıcıyı sil ki login'e atsın
+        setUser(null);
       } finally {
-        // 🔥 EN ÖNEMLİ KISIM: Ne olursa olsun loading'i kapat!
+        // İşlem bitti, bombayı iptal et ve loading'i kapat
+        clearTimeout(timeBomb);
         if (mounted) setLoading(false);
       }
     };
 
     initializeAuth();
 
-    // --- 3. Oturum Değişikliklerini Dinle ---
+    // Listener
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // console.log("Auth Olayı:", event); // Debug için açabilirsin
-
       if (session?.user) {
-        await fetchUserProfile(session.user);
+        setUser(session.user);
+        // Profil bilgisini burada tekrar çekmeye gerek yok, initialize yapıyor zaten.
+        // Ama rol değişimi için gerekirse buraya eklenebilir.
       } else {
         setUser(null);
         setRole(null);
-        // Sadece çıkış yapıldığında loading kapatılsın, 
-        // yönlendirmeyi middleware veya sayfalar halleder.
+        router.refresh(); // Çıkış yapınca sayfayı yenile
       }
-      setLoading(false);
+      // Listener tetiklendiğinde de loading kapat
+      if (mounted) setLoading(false);
     });
 
     return () => {
       mounted = false;
+      clearTimeout(timeBomb);
       authListener.subscription.unsubscribe();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signOut = async () => {
-    setLoading(true);
-    await supabase.auth.signOut();
-    setUser(null);
-    setRole(null);
-    router.replace("/login");
-    setLoading(false);
+    try {
+        setLoading(true);
+        await supabase.auth.signOut();
+        setUser(null);
+        setRole(null);
+        router.push("/login"); 
+    } catch (error) {
+        console.error("Çıkış hatası", error);
+    } finally {
+        setLoading(false);
+    }
   };
 
   // --- LOADING EKRANI ---
-  // Eğer hala yükleniyorsa, tüm siteyi durdurup bunu göster
   if (loading) {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 text-white gap-4">
-        <div className="relative">
-            <div className="w-16 h-16 border-4 border-slate-800 border-t-amber-500 rounded-full animate-spin"></div>
-            <div className="absolute inset-0 flex items-center justify-center font-bold text-xs">N</div>
-        </div>
-        <p className="text-slate-400 text-sm animate-pulse">Sistem Başlatılıyor...</p>
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 text-white gap-4 z-[9999] relative">
+        <Loader2 className="animate-spin text-amber-500 w-12 h-12" />
+        <p className="text-slate-400 text-sm font-mono animate-pulse">Sistem Bağlanıyor...</p>
       </div>
     );
   }
